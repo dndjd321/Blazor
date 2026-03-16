@@ -1,0 +1,119 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <base href="/" />
+    
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet" />
+    <link rel="stylesheet" href="app.css" />
+    <link rel="stylesheet" href="MyBlazorApp.styles.css" />
+    <link rel="icon" type="image/png" href="favicon.png" />
+    <HeadOutlet />
+
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+    <script src="https://unpkg.com/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.js"></script>
+</head>
+
+<body>
+    <Routes />
+    <script src="_framework/blazor.web.js"></script>
+
+    <script>
+        let chart;
+        let candleSeries;
+        let maSeries;
+        let volumeSeries;
+        let upperBandSeries; // 💡 볼린저 밴드 상단선
+        let lowerBandSeries; // 💡 볼린저 밴드 하단선
+        let minPriceLine = null;
+        let maxPriceLine = null;
+
+        window.createChart = (containerId) => {
+            const container = document.getElementById(containerId);
+            if (!container) return;
+            container.innerHTML = '';
+
+            chart = LightweightCharts.createChart(container, {
+                layout: { background: { color: '#1e222d' }, textColor: '#d1d4dc' },
+                grid: { vertLines: { color: '#2b2f3a' }, horzLines: { color: '#2b2f3a' } },
+                width: container.clientWidth,
+                height: 600,
+                timeScale: { timeVisible: true, secondsVisible: false }
+            });
+
+            chart.priceScale('right').applyOptions({ scaleMargins: { top: 0.1, bottom: 0.25 } });
+
+            candleSeries = chart.addCandlestickSeries({ upColor: '#26a69a', downColor: '#ef5350', borderVisible: false, wickUpColor: '#26a69a', wickDownColor: '#ef5350' });
+
+            // 💡 볼린저 밴드 라인 추가 (파란색)
+            upperBandSeries = chart.addLineSeries({ color: 'rgba(33, 150, 243, 0.6)', lineWidth: 1, crosshairMarkerVisible: false, priceLineVisible: false });
+            lowerBandSeries = chart.addLineSeries({ color: 'rgba(33, 150, 243, 0.6)', lineWidth: 1, crosshairMarkerVisible: false, priceLineVisible: false });
+
+            maSeries = chart.addLineSeries({ color: '#f3ba2f', lineWidth: 2, crosshairMarkerVisible: false, priceLineVisible: false });
+
+            volumeSeries = chart.addHistogramSeries({ priceFormat: { type: 'volume' }, priceScaleId: '' });
+            volumeSeries.priceScale().applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } });
+        };
+
+        window.updateChartData = (payload) => {
+            if (!payload || !payload.candles || payload.candles.length === 0) return;
+
+            if (candleSeries) {
+                candleSeries.setData(payload.candles);
+                if (payload.markers) candleSeries.setMarkers(payload.markers);
+            }
+            if (maSeries) maSeries.setData(payload.mas);
+            
+            // 💡 볼린저 밴드 데이터 적용
+            if (upperBandSeries && payload.upperBands) upperBandSeries.setData(payload.upperBands);
+            if (lowerBandSeries && payload.lowerBands) lowerBandSeries.setData(payload.lowerBands);
+            
+            if (volumeSeries) volumeSeries.setData(payload.volumes);
+
+            let min = Math.min(...payload.candles.map(d => d.low));
+            let max = Math.max(...payload.candles.map(d => d.high));
+
+            if (minPriceLine) candleSeries.removePriceLine(minPriceLine);
+            if (maxPriceLine) candleSeries.removePriceLine(maxPriceLine);
+
+            maxPriceLine = candleSeries.createPriceLine({ price: max, color: '#ef5350', lineWidth: 2, lineStyle: 2, axisLabelVisible: true, title: 'MAX' });
+            minPriceLine = candleSeries.createPriceLine({ price: min, color: '#26a69a', lineWidth: 2, lineStyle: 2, axisLabelVisible: true, title: 'MIN' });
+        };
+
+        // 💡 4단계: 소리 알림을 위한 웹 오디오 엔진 추가
+        window.audioCtx = null;
+        window.playAlarmSound = (type) => {
+            // 브라우저 오디오 컨텍스트 초기화 (사용자 상호작용 후 활성화됨)
+            if (!window.audioCtx) window.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            if (window.audioCtx.state === 'suspended') window.audioCtx.resume();
+            
+            const osc = window.audioCtx.createOscillator();
+            const gain = window.audioCtx.createGain();
+            osc.connect(gain);
+            gain.connect(window.audioCtx.destination);
+            
+            if (type === "BUY") {
+                // 매수 알림: 경쾌한 고음 (띠링~)
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(880, window.audioCtx.currentTime);
+                osc.frequency.setValueAtTime(1108, window.audioCtx.currentTime + 0.1); 
+                gain.gain.setValueAtTime(0.2, window.audioCtx.currentTime);
+                osc.start();
+                gain.gain.exponentialRampToValueAtTime(0.00001, window.audioCtx.currentTime + 0.5);
+                osc.stop(window.audioCtx.currentTime + 0.5);
+            } else if (type === "SELL") {
+                // 매도 알림: 묵직한 경고음 (뚜-웅)
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(250, window.audioCtx.currentTime);
+                gain.gain.setValueAtTime(0.1, window.audioCtx.currentTime);
+                osc.start();
+                gain.gain.exponentialRampToValueAtTime(0.00001, window.audioCtx.currentTime + 0.5);
+                osc.stop(window.audioCtx.currentTime + 0.5);
+            }
+        };
+    </script>
+</body>
+
+</html>

@@ -1,0 +1,541 @@
+﻿@page "/binance-chart"
+@rendermode InteractiveServer
+@inject IJSRuntime JSRuntime
+@using System.Net.Http.Json
+@using System.Text.Json
+@using System
+@implements IDisposable
+
+<PageTitle>바이낸스 실시간 예측 차트</PageTitle>
+
+<div class="container-fluid py-4" style="max-width: 1500px;">
+    <div class="d-flex flex-column flex-lg-row justify-content-between align-items-lg-center mb-3 p-4 rounded shadow-sm" style="background-color: #1e222d; border: 1px solid #2b3240;">
+        <div class="d-flex flex-wrap align-items-center gap-3 mb-3 mb-lg-0">
+            <h3 class="fw-bold mb-0 me-2" style="color: #f3ba2f;">
+                <i class="bi bi-currency-bitcoin"></i> 실시간 분석기
+            </h3>
+            
+            <select class="form-select border-secondary fw-bold shadow-sm" style="width: 160px; background-color: #2b3240; color: #d1d4dc;" value="@SelectedSymbol" @onchange="OnSymbolChanged">
+                <option value="BTCUSDT">BTC (비트코인)</option>
+                <option value="ETHUSDT">ETH (이더리움)</option>
+                <option value="SOLUSDT">SOL (솔라나)</option>
+                <option value="XRPUSDT">XRP (리플)</option>
+                <option value="DOGEUSDT">DOGE (도지)</option>
+            </select>
+
+            <div class="btn-group shadow-sm">
+                <button class="btn fw-bold @(SelectedInterval == "15m" ? "btn-primary" : "btn-outline-secondary")" style="color: @(SelectedInterval == "15m" ? "white" : "#d1d4dc");" @onclick='() => OnIntervalChanged("15m")'>15분</button>
+                <button class="btn fw-bold @(SelectedInterval == "1h" ? "btn-primary" : "btn-outline-secondary")" style="color: @(SelectedInterval == "1h" ? "white" : "#d1d4dc");" @onclick='() => OnIntervalChanged("1h")'>1시간</button>
+                <button class="btn fw-bold @(SelectedInterval == "4h" ? "btn-primary" : "btn-outline-secondary")" style="color: @(SelectedInterval == "4h" ? "white" : "#d1d4dc");" @onclick='() => OnIntervalChanged("4h")'>4시간</button>
+                <button class="btn fw-bold @(SelectedInterval == "1d" ? "btn-primary" : "btn-outline-secondary")" style="color: @(SelectedInterval == "1d" ? "white" : "#d1d4dc");" @onclick='() => OnIntervalChanged("1d")'>1일</button>
+            </div>
+        </div>
+
+        <div class="d-flex align-items-center gap-3">
+            <div class="form-check form-switch fs-5">
+                <input class="form-check-input shadow-sm" type="checkbox" role="switch" id="alarmSwitch" @bind="IsAlarmEnabled">
+                <label class="form-check-label fw-bold text-light" for="alarmSwitch" style="cursor: pointer;">
+                    <i class="bi bi-bell-fill @(IsAlarmEnabled ? "text-warning" : "text-secondary") me-1"></i> 소리 알림
+                </label>
+            </div>
+            <div class="badge @TrendColor p-2 px-4 fs-5 rounded-pill shadow-sm border border-secondary">
+                예측: @TrendText
+            </div>
+        </div>
+    </div>
+
+    <div class="card shadow-sm border-0 mb-4" style="background-color: #1e222d; border-radius: 12px; border: 1px solid #2b3240 !important;">
+        <div class="card-body p-4">
+            <div class="row align-items-center g-4">
+                <div class="col-lg-8">
+                    <div class="d-flex flex-column gap-3">
+                        <div class="text-warning fw-bold fs-5 mb-1">
+                            <i class="bi bi-sliders me-2"></i>매매 전략 튜닝
+                        </div>
+                        <div class="d-flex align-items-center gap-3">
+                            <span class="badge bg-success py-2 px-3 fs-6" style="min-width: 130px;">매수 (BUY) 기준</span>
+                            <input type="range" class="form-range flex-grow-1" min="10" max="50" step="1" 
+                                   @bind="RsiBuyThreshold" @bind:event="oninput" @onchange="UpdateChartAndIndicators">
+                            <span class="text-white fw-bold fs-5" style="width: 70px;">RSI @RsiBuyThreshold</span>
+                        </div>
+                        <div class="d-flex align-items-center gap-3">
+                            <span class="badge bg-danger py-2 px-3 fs-6" style="min-width: 130px;">매도 (SELL) 기준</span>
+                            <input type="range" class="form-range flex-grow-1" min="50" max="90" step="1" 
+                                   @bind="RsiSellThreshold" @bind:event="oninput" @onchange="UpdateChartAndIndicators">
+                            <span class="text-white fw-bold fs-5" style="width: 70px;">RSI @RsiSellThreshold</span>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="col-lg-4 border-start border-secondary pl-lg-4">
+                    <button class="btn btn-primary btn-lg w-100 fw-bold shadow mb-3" @onclick="RunBacktest">
+                        <i class="bi bi-play-circle-fill me-2"></i>1-Click 백테스트 실행
+                    </button>
+                    @if (IsBacktestRun)
+                    {
+                        <div class="p-3 rounded border border-secondary shadow-inner" style="background-color: #2b3240;">
+                            <h6 class="text-secondary fw-bold mb-2">가상 시뮬레이션 (초기 $10,000)</h6>
+                            <h2 class="fw-bold mb-3 @(ReturnRate >= 0 ? "text-success" : "text-danger")">
+                                @(ReturnRate >= 0 ? "+" : "")@ReturnRate.ToString("N2")%
+                            </h2>
+                            <div class="d-flex justify-content-between text-light" style="font-size: 0.95rem;">
+                                <span>최종: <strong class="text-white">$@FinalCapital.ToString("N0")</strong></span>
+                                <span>승률: <strong class="text-warning">@(TotalTrades > 0 ? ((double)WinningTrades / TotalTrades * 100).ToString("N0") : "0")%</strong> (@WinningTrades/@TotalTrades)</span>
+                            </div>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="p-3 rounded border border-secondary text-center text-muted" style="background-color: #2b3240; min-height: 110px; display:flex; align-items:center; justify-content:center;">
+                            전략을 튜닝하고 버튼을 눌러보세요.
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row g-4">
+        <div class="col-xl-9 col-lg-8">
+            <div class="card border-0 shadow-lg overflow-hidden" style="background-color: #1e222d; border-radius: 12px;">
+                <div id="chartContainer" style="width: 100%; height: 700px;"></div>
+            </div>
+        </div>
+
+        <div class="col-xl-3 col-lg-4 d-flex flex-column gap-3">
+            
+            <div class="card shadow-lg border-0" style="background-color: #1e222d; border-radius: 12px;">
+                <div class="card-body p-4">
+                    <h6 class="fw-bold mb-3" style="color: #8fa0b5;">
+                        <i class="bi bi-tag-fill me-2"></i>@DisplaySymbolName 현재가 (USDT)
+                    </h6>
+                    <h2 class="@PriceColor fw-bold mb-4" style="font-family: monospace;">@CurrentPrice.ToString("N2")</h2>
+                    
+                    <div class="p-3 rounded" style="background-color: #2b3240;">
+                        <div class="d-flex justify-content-between align-items-center mb-2">
+                            <span class="fw-bold" style="color: #8fa0b5;">현재 RSI (14)</span>
+                            <span class="fw-bold fs-5" style="color: #4facfe;">@Math.Round(RsiValue, 1)</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card shadow-lg border-0" style="background-color: #1e222d; border-radius: 12px; border: 1px solid #0d6efd !important;">
+                <div class="card-header border-0 pt-4 pb-0 bg-transparent d-flex justify-content-between align-items-center">
+                    <h5 class="fw-bold mb-0 text-white"><i class="bi bi-wallet2 text-primary me-2"></i>실전 모의투자 지갑</h5>
+                    <div class="form-check form-switch">
+                        <input class="form-check-input bg-primary border-primary" type="checkbox" role="switch" id="autoTradeSwitch" @bind="IsAutoTradeEnabled">
+                        <label class="form-check-label text-white" for="autoTradeSwitch" style="font-size: 0.85rem;">자동매매</label>
+                    </div>
+                </div>
+                <div class="card-body p-4">
+                    <div class="mb-4">
+                        <div class="text-secondary mb-1" style="font-size: 0.9rem;">총 평가 자산 (USDT)</div>
+                        <h3 class="fw-bold mb-1 text-white">
+                            $@((PaperUsdt + (PaperCoin * CurrentPrice)).ToString("N2"))
+                        </h3>
+                        @{
+                            double unrealizedPnl = (((PaperUsdt + (PaperCoin * CurrentPrice)) - 10000) / 10000) * 100;
+                            string pnlColor = unrealizedPnl >= 0 ? "text-success" : "text-danger";
+                            string pnlSign = unrealizedPnl >= 0 ? "+" : "";
+                        }
+                        <div class="@pnlColor fw-bold" style="font-size: 0.95rem;">수익률: @pnlSign@unrealizedPnl.ToString("N2")%</div>
+                    </div>
+
+                    <div class="d-flex justify-content-between text-light mb-2 px-2 py-1 rounded" style="background-color: rgba(255,255,255,0.05); font-size: 0.9rem;">
+                        <span>보유 현금</span>
+                        <span class="fw-bold text-warning">$@PaperUsdt.ToString("N2")</span>
+                    </div>
+                    <div class="d-flex justify-content-between text-light mb-4 px-2 py-1 rounded" style="background-color: rgba(255,255,255,0.05); font-size: 0.9rem;">
+                        <span>보유 코인 (@DisplaySymbolName)</span>
+                        <span class="fw-bold text-info">@PaperCoin.ToString("N6")</span>
+                    </div>
+
+                    <div class="row g-2 mb-3">
+                        <div class="col-6">
+                            <button class="btn btn-success w-100 fw-bold" @onclick='() => ExecutePaperTrade("BUY")' disabled="@(PaperUsdt <= 0)">시장가 매수</button>
+                        </div>
+                        <div class="col-6">
+                            <button class="btn btn-danger w-100 fw-bold" @onclick='() => ExecutePaperTrade("SELL")' disabled="@(PaperCoin <= 0)">시장가 매도</button>
+                        </div>
+                    </div>
+
+                    @if (PaperTradeLogs.Any())
+                    {
+                        <div class="p-2 rounded bg-dark border border-secondary" style="font-size: 0.8rem; color: #abb2bf; height: 90px; overflow-y: auto;">
+                            @foreach (var log in PaperTradeLogs)
+                            {
+                                <div class="mb-1">@log</div>
+                            }
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="text-center text-secondary" style="font-size: 0.85rem;">체결 내역이 없습니다.</div>
+                    }
+                </div>
+            </div>
+
+            <div class="card shadow-lg border-0" style="background-color: #1e222d; border-radius: 12px; border: 1px solid #2b3240 !important;">
+                <div class="card-header border-0 pt-4 pb-0 bg-transparent d-flex justify-content-between align-items-center">
+                    <h6 class="fw-bold mb-0" style="color: #0dcaf0;"><i class="bi bi-radar me-2"></i>AI 감시 레이더</h6>
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" role="switch" id="scannerSwitch" @bind="IsScannerEnabled">
+                    </div>
+                </div>
+                <div class="card-body p-4">
+                    @if (IsScannerEnabled)
+                    {
+                        @if (ScannerLogs.Any())
+                        {
+                            <div class="list-group list-group-flush rounded" style="max-height: 120px; overflow-y: auto;">
+                                @foreach (var log in ScannerLogs)
+                                {
+                                    <div class="list-group-item border-secondary px-2 py-1 mb-1 rounded shadow-sm" style="background-color: #2b3240; font-size: 0.8rem; color: #d1d4dc; border-left: 4px solid @(log.Contains("LONG") ? "#28a745" : "#dc3545");">
+                                        @log
+                                    </div>
+                                }
+                            </div>
+                        }
+                    }
+                    else
+                    {
+                        <div class="text-center text-muted" style="font-size: 0.85rem;">레이더가 꺼져있습니다.</div>
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    private string SelectedSymbol = "BTCUSDT";
+    private string SelectedInterval = "1h";
+    private string DisplaySymbolName = "BTC";
+
+    private int RsiBuyThreshold = 35;
+    private int RsiSellThreshold = 65;
+
+    // 백테스팅 변수
+    private bool IsBacktestRun = false;
+    private double InitialCapital = 10000;
+    private double FinalCapital = 10000;
+    private double ReturnRate = 0;
+    private int TotalTrades = 0;
+    private int WinningTrades = 0;
+
+    // 💡 모의투자(Paper Trading) 관련 변수
+    private double PaperUsdt = 10000;
+    private double PaperCoin = 0;
+    private double PaperAvgPrice = 0;
+    private bool IsAutoTradeEnabled = false;
+    private List<string> PaperTradeLogs = new();
+
+    // 스캐너 관련 변수
+    private bool IsScannerEnabled = false;
+    private List<string> ScanList = new() { "BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "DOGEUSDT" };
+    private Dictionary<string, string> ScannerLastSignals = new();
+    private List<string> ScannerLogs = new();
+    private System.Threading.Timer? _scannerTimer;
+
+    public class KlineData {
+        public long Time { get; set; }
+        public double Open { get; set; }
+        public double High { get; set; }
+        public double Low { get; set; }
+        public double Close { get; set; }
+        public double Volume { get; set; }
+    }
+    private List<KlineData> _cachedData = new();
+
+    private double CurrentPrice;
+    private double RsiValue;
+    private double MaValue;
+    private string TrendText = "대기 중";
+    private string TrendColor = "bg-secondary";
+    private string PriceColor = "text-white";
+    private string GuidelineMessage = "데이터를 동기화하고 있습니다...";
+    private string GuidelineClass = "alert-dark text-white";
+    private string ErrorMessage = "";
+    private System.Threading.Timer? _timer;
+
+    private bool IsAlarmEnabled = false;
+    private string LastSignal = "WAIT"; 
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            try
+            {
+                await JSRuntime.InvokeVoidAsync("createChart", "chartContainer");
+                _timer = new System.Threading.Timer(async _ =>
+                {
+                    await FetchDataFromBinance();
+                    await InvokeAsync(StateHasChanged);
+                }, null, 0, 2000); 
+
+                _scannerTimer = new System.Threading.Timer(async _ =>
+                {
+                    if (IsScannerEnabled) { await RunBackgroundScanner(); await InvokeAsync(StateHasChanged); }
+                }, null, 0, 10000);
+            }
+            catch { }
+        }
+    }
+
+    private async Task OnSymbolChanged(ChangeEventArgs e)
+    {
+        SelectedSymbol = e.Value?.ToString() ?? "BTCUSDT";
+        DisplaySymbolName = SelectedSymbol.Replace("USDT", "");
+        LastSignal = "WAIT"; 
+        IsBacktestRun = false; 
+        await FetchDataFromBinance();
+    }
+
+    private async Task OnIntervalChanged(string interval)
+    {
+        SelectedInterval = interval;
+        LastSignal = "WAIT"; 
+        IsBacktestRun = false; 
+        await FetchDataFromBinance();
+    }
+
+    // 💡 모의투자 매수/매도 실행 엔진
+    private void ExecutePaperTrade(string side)
+    {
+        if (side == "BUY" && PaperUsdt > 0)
+        {
+            PaperCoin = PaperUsdt / CurrentPrice;
+            PaperAvgPrice = CurrentPrice;
+            PaperUsdt = 0; // 전액 매수
+            PaperTradeLogs.Insert(0, $"[{DateTime.Now:HH:mm:ss}] 🟢 매수 체결: ${CurrentPrice:N2}");
+            if (IsAlarmEnabled) _ = JSRuntime.InvokeVoidAsync("playAlarmSound", "BUY");
+        }
+        else if (side == "SELL" && PaperCoin > 0)
+        {
+            double pnlPercentage = ((CurrentPrice - PaperAvgPrice) / PaperAvgPrice) * 100;
+            PaperUsdt = PaperCoin * CurrentPrice; // 전액 매도
+            PaperCoin = 0;
+            string pnlStr = pnlPercentage >= 0 ? $"+{pnlPercentage:N2}%" : $"{pnlPercentage:N2}%";
+            PaperTradeLogs.Insert(0, $"[{DateTime.Now:HH:mm:ss}] 🔴 매도 체결: ${CurrentPrice:N2} ({pnlStr})");
+            if (IsAlarmEnabled) _ = JSRuntime.InvokeVoidAsync("playAlarmSound", "SELL");
+        }
+        
+        // 로그 10개 유지
+        if (PaperTradeLogs.Count > 10) PaperTradeLogs.RemoveAt(10);
+    }
+
+    private async Task FetchDataFromBinance()
+    {
+        try
+        {
+            using var client = new HttpClient();
+            string url = $"https://api.binance.com/api/v3/klines?symbol={SelectedSymbol}&interval={SelectedInterval}&limit=100";
+            var response = await client.GetFromJsonAsync<JsonElement[][]>(url);
+
+            if (response != null)
+            {
+                _cachedData = response.Select(c => new KlineData {
+                    Time = c[0].GetInt64() / 1000,
+                    Open = double.Parse(c[1].GetString()!),
+                    High = double.Parse(c[2].GetString()!),
+                    Low = double.Parse(c[3].GetString()!),
+                    Close = double.Parse(c[4].GetString()!),
+                    Volume = double.Parse(c[5].GetString()!)
+                }).ToList();
+
+                CurrentPrice = _cachedData.Last().Close;
+                UpdateChartAndIndicators();
+            }
+        }
+        catch { }
+    }
+
+    private async Task RunBackgroundScanner()
+    {
+        using var client = new HttpClient();
+        foreach (var symbol in ScanList)
+        {
+            if (symbol == SelectedSymbol) continue;
+            try
+            {
+                string url = $"https://api.binance.com/api/v3/klines?symbol={symbol}&interval={SelectedInterval}&limit=100";
+                var response = await client.GetFromJsonAsync<JsonElement[][]>(url);
+                if (response == null) continue;
+
+                var closes = response.Select(c => double.Parse(c[4].GetString()!)).ToList();
+                double avgGain = 0, avgLoss = 0, currentRsi = 50;
+                for (int i = 1; i < closes.Count; i++)
+                {
+                    double diff = closes[i] - closes[i - 1];
+                    if (i <= 14)
+                    {
+                        if (diff > 0) avgGain += diff; else avgLoss -= diff;
+                        if (i == 14) currentRsi = 100 - (100 / (1 + (avgLoss == 0 ? 100 : (avgGain/14) / (avgLoss/14))));
+                    }
+                    else
+                    {
+                        avgGain = ((avgGain * 13) + (diff > 0 ? diff : 0)) / 14;
+                        avgLoss = ((avgLoss * 13) + (diff < 0 ? -diff : 0)) / 14;
+                        currentRsi = 100 - (100 / (1 + (avgLoss == 0 ? 100 : avgGain / avgLoss)));
+                    }
+                }
+
+                string signal = "WAIT";
+                if (currentRsi <= RsiBuyThreshold) signal = "BUY";
+                else if (currentRsi >= RsiSellThreshold) signal = "SELL";
+
+                if (!ScannerLastSignals.ContainsKey(symbol)) ScannerLastSignals[symbol] = "WAIT";
+                if (signal != "WAIT" && signal != ScannerLastSignals[symbol])
+                {
+                    string actionStr = signal == "BUY" ? "🟢 LONG" : "🔴 SHORT";
+                    ScannerLogs.Insert(0, $"[{DateTime.Now:HH:mm:ss}] {symbol.Replace("USDT", "")} {actionStr} (RSI: {currentRsi:F1})");
+                    if (ScannerLogs.Count > 10) ScannerLogs.RemoveAt(10);
+                    if (IsAlarmEnabled) _ = JSRuntime.InvokeVoidAsync("playAlarmSound", signal);
+                }
+                ScannerLastSignals[symbol] = signal;
+            }
+            catch { }
+        }
+    }
+
+    private void UpdateChartAndIndicators()
+    {
+        if (!_cachedData.Any()) return;
+        var chartData = _cachedData;
+
+        // 💡 볼린저 밴드 계산 로직 추가
+        var maData = new List<object>();
+        var upperBandData = new List<object>();
+        var lowerBandData = new List<object>();
+
+        for (int i = 0; i < chartData.Count; i++)
+        {
+            if (i < 19) continue; 
+            
+            // 평균(MA) 계산
+            double sum = 0;
+            for (int j = 0; j < 20; j++) sum += chartData[i - j].Close;
+            double sma = sum / 20.0;
+            maData.Add(new { time = chartData[i].Time, value = sma });
+
+            // 표준편차 계산
+            double sumSq = 0;
+            for (int j = 0; j < 20; j++) sumSq += Math.Pow(chartData[i - j].Close - sma, 2);
+            double stdDev = Math.Sqrt(sumSq / 20.0);
+
+            // 볼린저 밴드 상/하단 저장
+            upperBandData.Add(new { time = chartData[i].Time, value = sma + (stdDev * 2) });
+            lowerBandData.Add(new { time = chartData[i].Time, value = sma - (stdDev * 2) });
+        }
+
+        var volumeData = chartData.Select(d => new {
+            time = d.Time, value = d.Volume, color = d.Close >= d.Open ? "rgba(38, 166, 154, 0.4)" : "rgba(239, 83, 80, 0.4)"
+        }).ToList();
+
+        var markers = new List<object>();
+        double[] rsiHistory = new double[chartData.Count];
+        double avgGain = 0, avgLoss = 0;
+
+        for (int i = 1; i < chartData.Count; i++)
+        {
+            double diff = chartData[i].Close - chartData[i - 1].Close;
+            if (i <= 14)
+            {
+                if (diff > 0) avgGain += diff; else avgLoss -= diff;
+                if (i == 14) {
+                    avgGain /= 14; avgLoss /= 14;
+                    rsiHistory[i] = 100 - (100 / (1 + (avgLoss == 0 ? 100 : avgGain / avgLoss)));
+                }
+            }
+            else
+            {
+                double gain = diff > 0 ? diff : 0;
+                double loss = diff < 0 ? -diff : 0;
+                avgGain = ((avgGain * 13) + gain) / 14;
+                avgLoss = ((avgLoss * 13) + loss) / 14;
+                rsiHistory[i] = 100 - (100 / (1 + (avgLoss == 0 ? 100 : avgGain / avgLoss)));
+
+                if (rsiHistory[i - 1] > RsiBuyThreshold && rsiHistory[i] <= RsiBuyThreshold)
+                    markers.Add(new { time = chartData[i].Time, position = "belowBar", color = "#26a69a", shape = "arrowUp", text = "BUY" });
+                else if (rsiHistory[i - 1] < RsiSellThreshold && rsiHistory[i] >= RsiSellThreshold)
+                    markers.Add(new { time = chartData[i].Time, position = "aboveBar", color = "#ef5350", shape = "arrowDown", text = "SELL" });
+            }
+        }
+
+        RsiValue = rsiHistory.Last();
+        MaValue = maData.Any() ? (double)maData.Last().GetType().GetProperty("value").GetValue(maData.Last()) : 0;
+
+        string currentSignal = "WAIT";
+        if (RsiValue <= RsiBuyThreshold) currentSignal = "BUY";
+        else if (RsiValue >= RsiSellThreshold) currentSignal = "SELL";
+
+        if (currentSignal != "WAIT" && currentSignal != LastSignal)
+        {
+            if (IsAlarmEnabled) _ = JSRuntime.InvokeVoidAsync("playAlarmSound", currentSignal);
+            
+            // 💡 자동매매 스위치가 켜져있다면 타점 도착 시 모의투자 자동 체결!
+            if (IsAutoTradeEnabled) ExecutePaperTrade(currentSignal);
+        }
+        LastSignal = currentSignal;
+
+        // JS로 모든 보조지표 데이터를 넘깁니다 (볼린저 밴드 포함)
+        _ = JSRuntime.InvokeVoidAsync("updateChartData", new {
+            candles = chartData.Select(d => new { time = d.Time, open = d.Open, high = d.High, low = d.Low, close = d.Close }),
+            mas = maData,
+            upperBands = upperBandData, // 상단선
+            lowerBands = lowerBandData, // 하단선
+            volumes = volumeData,
+            markers = markers 
+        });
+    }
+
+    private void RunBacktest()
+    {
+        if (!_cachedData.Any()) return;
+        double currentCap = InitialCapital, coinAmt = 0;
+        bool isHolding = false; double buyPx = 0;
+        TotalTrades = 0; WinningTrades = 0;
+
+        double[] rsiHistory = new double[_cachedData.Count];
+        double avgGain = 0, avgLoss = 0;
+
+        for (int i = 1; i < _cachedData.Count; i++)
+        {
+            double diff = _cachedData[i].Close - _cachedData[i - 1].Close;
+            if (i <= 14)
+            {
+                if (diff > 0) avgGain += diff; else avgLoss -= diff;
+                if (i == 14) {
+                    avgGain /= 14; avgLoss /= 14;
+                    rsiHistory[i] = 100 - (100 / (1 + (avgLoss == 0 ? 100 : avgGain / avgLoss)));
+                }
+            }
+            else
+            {
+                avgGain = ((avgGain * 13) + (diff > 0 ? diff : 0)) / 14;
+                avgLoss = ((avgLoss * 13) + (diff < 0 ? -diff : 0)) / 14;
+                rsiHistory[i] = 100 - (100 / (1 + (avgLoss == 0 ? 100 : avgGain / avgLoss)));
+
+                if (rsiHistory[i - 1] > RsiBuyThreshold && rsiHistory[i] <= RsiBuyThreshold)
+                {
+                    if (!isHolding) { buyPx = _cachedData[i].Close; coinAmt = currentCap / buyPx; currentCap = 0; isHolding = true; }
+                }
+                else if (rsiHistory[i - 1] < RsiSellThreshold && rsiHistory[i] >= RsiSellThreshold)
+                {
+                    if (isHolding) {
+                        double sellPx = _cachedData[i].Close; currentCap = coinAmt * sellPx; coinAmt = 0; isHolding = false;
+                        TotalTrades++; if (sellPx > buyPx) WinningTrades++;
+                    }
+                }
+            }
+        }
+        if (isHolding) currentCap = coinAmt * _cachedData.Last().Close;
+        FinalCapital = currentCap;
+        ReturnRate = ((FinalCapital - InitialCapital) / InitialCapital) * 100;
+        IsBacktestRun = true;
+    }
+
+    public void Dispose() { _timer?.Dispose(); _scannerTimer?.Dispose(); }
+}
