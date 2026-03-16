@@ -1,0 +1,243 @@
+﻿@page "/kimchi-premium"
+@rendermode InteractiveServer
+@using System.Text.Json
+@implements IDisposable
+
+<PageTitle>실시간 김치 프리미엄 계산기</PageTitle>
+
+<div class="container-fluid py-4" style="max-width: 1200px;">
+    
+    <div class="mb-4 p-4 rounded-4 shadow-sm" style="background: linear-gradient(135deg, #1e222d, #0f172a); border: 1px solid #2b3240;">
+        <div class="d-flex justify-content-between align-items-center flex-wrap gap-3">
+            <div>
+                <h2 class="fw-bold text-white mb-2">
+                    <i class="bi bi-arrow-left-right text-danger me-2"></i> 실시간 김치 프리미엄
+                </h2>
+                <p class="text-light opacity-75 mb-0 fs-5">업비트(Upbit)와 바이낸스(Binance)의 실시간 가격 차이를 비교합니다.</p>
+            </div>
+            <div class="text-end">
+                <span class="badge bg-secondary fs-6 py-2 px-3 shadow-sm mb-2 d-inline-block">
+                    <i class="bi bi-clock-history me-1"></i> 3초마다 자동 갱신 중
+                </span><br/>
+                <span class="badge bg-success fs-6 py-2 px-3 shadow-sm d-inline-block">
+                    <i class="bi bi-currency-exchange me-1"></i> 실시간 환율: ₩@ExchangeRate.ToString("N2")
+                </span>
+            </div>
+        </div>
+    </div>
+
+    <div class="row g-4">
+        @if (IsLoading && !CoinList.Any())
+        {
+            <div class="col-12 text-center py-5">
+                <div class="spinner-border text-primary" style="width: 3rem; height: 3rem;" role="status"></div>
+                <h5 class="mt-3 text-secondary fw-bold">거래소 데이터를 실시간으로 동기화하고 있습니다...</h5>
+            </div>
+        }
+        else
+        {
+            @foreach (var coin in CoinList)
+            {
+                <div class="col-lg-12">
+                    <div class="card shadow-sm border-0 rounded-4" style="background-color: #1e222d; border: 1px solid #2b3240 !important;">
+                        <div class="card-body p-4">
+                            <div class="row align-items-center text-white">
+                                
+                                <div class="col-md-2 text-center text-md-start mb-3 mb-md-0">
+                                    <div class="d-flex align-items-center justify-content-center justify-content-md-start">
+                                        <div class="bg-dark rounded-circle d-flex align-items-center justify-content-center me-3" style="width: 50px; height: 50px; border: 2px solid #343a40;">
+                                            <i class="bi bi-currency-bitcoin fs-3 text-warning"></i>
+                                        </div>
+                                        <div>
+                                            <h4 class="fw-bold mb-0">@coin.Symbol</h4>
+                                            <span class="text-secondary" style="font-size: 0.85rem;">@coin.Name</span>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div class="col-md-3 text-center border-end border-secondary border-opacity-25 mb-3 mb-md-0">
+                                    <div class="text-secondary fw-bold mb-1" style="font-size: 0.85rem;">업비트 (KRW)</div>
+                                    <h4 class="fw-bold text-white mb-0" style="font-family: monospace;">
+                                        ₩@coin.UpbitPrice.ToString("N0")
+                                    </h4>
+                                </div>
+
+                                <div class="col-md-3 text-center border-end border-secondary border-opacity-25 mb-3 mb-md-0">
+                                    <div class="text-secondary fw-bold mb-1" style="font-size: 0.85rem;">바이낸스 (환산 KRW)</div>
+                                    <h4 class="fw-bold text-light mb-0" style="font-family: monospace;">
+                                        ₩@coin.BinanceKrw.ToString("N0")
+                                    </h4>
+                                    <div class="text-muted mt-1" style="font-size: 0.8rem; font-family: monospace;">
+                                        ($@coin.BinanceUsdt.ToString("N4"))
+                                    </div>
+                                </div>
+
+                                <div class="col-md-4 text-center">
+                                    <div class="text-secondary fw-bold mb-1" style="font-size: 0.85rem;">김치 프리미엄 차액</div>
+                                    <div class="d-flex align-items-center justify-content-center gap-2">
+                                        <h3 class="fw-bold mb-0 @(coin.Premium > 0 ? "text-danger" : "text-info")" style="font-family: monospace;">
+                                            @(coin.Premium > 0 ? "+" : "")@coin.Premium.ToString("N2")%
+                                        </h3>
+                                        <span class="badge @(coin.Premium > 0 ? "bg-danger" : "bg-info") opacity-75">
+                                            @(coin.Premium > 0 ? "+" : "")₩@((coin.UpbitPrice - coin.BinanceKrw).ToString("N0"))
+                                        </span>
+                                    </div>
+                                </div>
+
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            }
+        }
+        
+        @if (!string.IsNullOrEmpty(ErrorMessage))
+        {
+            <div class="col-12 mt-3">
+                <div class="alert alert-danger fw-bold"><i class="bi bi-exclamation-triangle-fill me-2"></i>@ErrorMessage</div>
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    public class CoinInfo
+    {
+        public string Symbol { get; set; } = "";
+        public string Name { get; set; } = "";
+        public double UpbitPrice { get; set; }
+        public double BinanceUsdt { get; set; }
+        public double BinanceKrw { get; set; }
+        public double Premium { get; set; }
+    }
+
+    private List<CoinInfo> CoinList = new();
+    private double ExchangeRate = 1350;
+    private bool IsLoading = true;
+    private string ErrorMessage = "";
+    private System.Threading.Timer? _timer;
+    private readonly HttpClient _client = new HttpClient();
+
+    // 추적할 코인 목록 세팅
+    private readonly Dictionary<string, string> Targets = new()
+    {
+        { "BTC", "비트코인" },
+        { "ETH", "이더리움" },
+        { "SOL", "솔라나" },
+        { "XRP", "리플" },
+        { "DOGE", "도지코인" }
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        // 최초 1회 환율 로드
+        await FetchExchangeRate();
+        
+        // 데이터 최초 로드
+        await FetchPrices();
+        IsLoading = false;
+
+        // 3초마다 자동으로 가격을 긁어오는 백그라운드 타이머 시작
+        _timer = new System.Threading.Timer(async _ =>
+        {
+            await FetchPrices();
+            await InvokeAsync(StateHasChanged);
+        }, null, 3000, 3000);
+    }
+
+    private async Task FetchExchangeRate()
+    {
+        try
+        {
+            var response = await _client.GetAsync("https://api.exchangerate-api.com/v4/latest/USD");
+            if (response.IsSuccessStatusCode)
+            {
+                var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+                ExchangeRate = doc.RootElement.GetProperty("rates").GetProperty("KRW").GetDouble();
+            }
+        }
+        catch { /* 환율 로드 실패 시 기본값 1350 유지 */ }
+    }
+
+    private async Task FetchPrices()
+    {
+        try
+        {
+            var tempList = new List<CoinInfo>();
+
+            // 1. 업비트 API 호출 (KRW 마켓 여러 개 한 번에 조회)
+            string upbitMarkets = string.Join(",", Targets.Keys.Select(k => $"KRW-{k}"));
+            var upbitResponse = await _client.GetAsync($"https://api.upbit.com/v1/ticker?markets={upbitMarkets}");
+            
+            var upbitData = new Dictionary<string, double>();
+            if (upbitResponse.IsSuccessStatusCode)
+            {
+                var doc = JsonDocument.Parse(await upbitResponse.Content.ReadAsStringAsync());
+                foreach (var item in doc.RootElement.EnumerateArray())
+                {
+                    string market = item.GetProperty("market").GetString()!.Replace("KRW-", "");
+                    double price = item.GetProperty("trade_price").GetDouble();
+                    upbitData[market] = price;
+                }
+            }
+
+            // 2. 바이낸스 API 호출 (전체 시세 목록을 가져와서 메모리에서 필터링 - 이게 훨씬 빠름)
+            var binanceResponse = await _client.GetAsync("https://api.binance.com/api/v3/ticker/price");
+            var binanceData = new Dictionary<string, double>();
+            if (binanceResponse.IsSuccessStatusCode)
+            {
+                var doc = JsonDocument.Parse(await binanceResponse.Content.ReadAsStringAsync());
+                foreach (var item in doc.RootElement.EnumerateArray())
+                {
+                    string symbol = item.GetProperty("symbol").GetString()!;
+                    if (symbol.EndsWith("USDT"))
+                    {
+                        string coin = symbol.Replace("USDT", "");
+                        if (Targets.ContainsKey(coin))
+                        {
+                            binanceData[coin] = double.Parse(item.GetProperty("price").GetString()!);
+                        }
+                    }
+                }
+            }
+
+            // 3. 데이터 결합 및 김치 프리미엄 계산 로직
+            foreach (var kvp in Targets)
+            {
+                string symbol = kvp.Key;
+                if (upbitData.ContainsKey(symbol) && binanceData.ContainsKey(symbol))
+                {
+                    double upbitPrice = upbitData[symbol];
+                    double binanceUsdt = binanceData[symbol];
+                    double binanceKrw = binanceUsdt * ExchangeRate;
+                    
+                    // 프리미엄 = ((업비트가 / 바이낸스가) - 1) * 100
+                    double premium = ((upbitPrice / binanceKrw) - 1) * 100;
+
+                    tempList.Add(new CoinInfo
+                    {
+                        Symbol = symbol,
+                        Name = kvp.Value,
+                        UpbitPrice = upbitPrice,
+                        BinanceUsdt = binanceUsdt,
+                        BinanceKrw = binanceKrw,
+                        Premium = premium
+                    });
+                }
+            }
+
+            CoinList = tempList;
+            ErrorMessage = "";
+        }
+        catch (Exception)
+        {
+            // 백그라운드 갱신 중 에러가 나도 기존 화면을 덮어쓰지 않음
+            ErrorMessage = "시세 동기화 중 일시적인 네트워크 지연이 발생했습니다.";
+        }
+    }
+
+    public void Dispose()
+    {
+        _timer?.Dispose(); // 페이지를 나갈 때 타이머를 안전하게 꺼줍니다.
+    }
+}

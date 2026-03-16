@@ -1,0 +1,207 @@
+﻿@page "/regexcron"
+@rendermode InteractiveServer
+@using System.Text.RegularExpressions
+@using System.Net
+
+<PageTitle>개발자 유틸 - Regex & Cron</PageTitle>
+
+<div class="container-fluid py-4" style="max-width: 1200px;">
+    
+    <div class="mb-4 p-4 rounded-4 shadow-sm" style="background: linear-gradient(135deg, #2c3e50, #3498db);">
+        <h2 class="fw-bold text-white mb-2">
+            <i class="bi bi-terminal-fill text-warning me-2"></i> Regex & Cron 마스터
+        </h2>
+        <p class="text-light opacity-75 mb-0 fs-5">복잡한 정규표현식 검증과 서버 스케줄러(Cron) 생성을 1초 만에 해결하세요.</p>
+    </div>
+
+    <div class="row g-4">
+        
+        <div class="col-xl-7">
+            <div class="card shadow-sm border-0 h-100 rounded-4">
+                <div class="card-header bg-white border-0 pt-4 pb-2 d-flex justify-content-between align-items-center">
+                    <h5 class="fw-bold mb-0" style="color: #2c3e50;"><i class="bi bi-regex text-primary me-2"></i>정규표현식(Regex) 실시간 테스터</h5>
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" id="ignoreCase" @bind="IgnoreCase" @bind:event="oninput" @onchange="UpdateRegexMatch">
+                        <label class="form-check-label text-muted" for="ignoreCase">대소문자 무시 (IgnoreCase)</label>
+                    </div>
+                </div>
+                <div class="card-body p-4 d-flex flex-column gap-3">
+                    
+                    <div>
+                        <label class="form-label fw-bold text-secondary">정규식 패턴 (Pattern)</label>
+                        <div class="input-group shadow-sm">
+                            <span class="input-group-text bg-light text-muted border-end-0">/</span>
+                            <input type="text" class="form-control border-start-0 font-monospace text-primary fw-bold" 
+                                   @bind="RegexPattern" @bind:event="oninput" @onkeyup="UpdateRegexMatch" 
+                                   placeholder="예: ^[a-zA-Z0-9]+@@[a-zA-Z0-9]+\.[A-Za-z]+$" />
+                            <span class="input-group-text bg-light text-muted border-start-0">/</span>
+                        </div>
+                        @if (!string.IsNullOrEmpty(RegexError))
+                        {
+                            <div class="text-danger mt-1" style="font-size: 0.85rem;"><i class="bi bi-exclamation-triangle me-1"></i>@RegexError</div>
+                        }
+                    </div>
+
+                    <div class="flex-grow-1">
+                        <label class="form-label fw-bold text-secondary">테스트 문자열 (Test String)</label>
+                        <textarea class="form-control font-monospace mb-3 shadow-sm" rows="4" 
+                                  @bind="TestString" @bind:event="oninput" @onkeyup="UpdateRegexMatch" 
+                                  placeholder="검증할 텍스트를 입력하세요..."></textarea>
+                    </div>
+
+                    <div>
+                        <label class="form-label fw-bold text-success"><i class="bi bi-check-circle-fill me-1"></i>매칭 결과 (@MatchCount 건)</label>
+                        <div class="p-3 rounded-3 border bg-light font-monospace text-break shadow-inner" style="min-height: 100px; line-height: 1.8;">
+                            @if (MatchCount > 0)
+                            {
+                                @((MarkupString)HighlightedResult)
+                            }
+                            else
+                            {
+                                <span class="text-muted">매칭되는 결과가 없습니다.</span>
+                            }
+                        </div>
+                    </div>
+                    
+                    <div class="d-flex flex-wrap gap-2 mt-2">
+                        <span class="badge bg-secondary cursor-pointer p-2" @onclick="SetEmailPreset">이메일 검증</span>
+                        <span class="badge bg-secondary cursor-pointer p-2" @onclick="SetPhonePreset">휴대폰 번호</span>
+                        <span class="badge bg-secondary cursor-pointer p-2" @onclick="SetPasswordPreset">강력한 비밀번호</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-xl-5">
+            <div class="card shadow-sm border-0 h-100 rounded-4" style="background-color: #f8f9fa;">
+                <div class="card-header bg-transparent border-0 pt-4 pb-2">
+                    <h5 class="fw-bold mb-0" style="color: #2c3e50;"><i class="bi bi-clock-history text-success me-2"></i>Cron 스케줄 생성기</h5>
+                </div>
+                <div class="card-body p-4">
+                    
+                    <div class="p-4 rounded-4 text-center mb-4 shadow" style="background-color: #2c3e50;">
+                        <h2 class="font-monospace text-warning fw-bold mb-2 tracking-widest" style="letter-spacing: 5px;">@GeneratedCron</h2>
+                        <div class="text-white fs-5 fw-bold">@CronDescription</div>
+                    </div>
+
+                    <div class="mb-4">
+                        <label class="form-label fw-bold text-secondary">자주 쓰는 스케줄 (클릭)</label>
+                        <div class="d-flex flex-wrap gap-2">
+                            <button class="btn btn-sm btn-outline-primary fw-bold" @onclick="SetCronPreset1">매 1분마다</button>
+                            <button class="btn btn-sm btn-outline-primary fw-bold" @onclick="SetCronPreset2">매시간 정각</button>
+                            <button class="btn btn-sm btn-outline-primary fw-bold" @onclick="SetCronPreset3">매일 자정</button>
+                            <button class="btn btn-sm btn-outline-primary fw-bold" @onclick="SetCronPreset4">월요일 출근시간</button>
+                        </div>
+                    </div>
+
+                    <label class="form-label fw-bold text-secondary">수동 조합기</label>
+                    <div class="row g-2 mb-3">
+                        <div class="col-4"><input type="text" class="form-control text-center font-monospace" @bind="CronMin" @bind:event="oninput" @onkeyup="UpdateCron" placeholder="분 (0-59)"></div>
+                        <div class="col-4"><input type="text" class="form-control text-center font-monospace" @bind="CronHour" @bind:event="oninput" @onkeyup="UpdateCron" placeholder="시 (0-23)"></div>
+                        <div class="col-4"><input type="text" class="form-control text-center font-monospace" @bind="CronDay" @bind:event="oninput" @onkeyup="UpdateCron" placeholder="일 (1-31)"></div>
+                        <div class="col-6"><input type="text" class="form-control text-center font-monospace" @bind="CronMonth" @bind:event="oninput" @onkeyup="UpdateCron" placeholder="월 (1-12)"></div>
+                        <div class="col-6"><input type="text" class="form-control text-center font-monospace" @bind="CronWeek" @bind:event="oninput" @onkeyup="UpdateCron" placeholder="요일 (0-6)"></div>
+                    </div>
+                    
+                    <div class="alert alert-info py-2" style="font-size: 0.85rem;">
+                        <i class="bi bi-info-circle-fill me-1"></i> <strong>*</strong> (모든 값), <strong>,</strong> (구분), <strong>-</strong> (범위), <strong>/</strong> (주기) 기호를 사용할 수 있습니다.
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+</div>
+
+<style>
+    .cursor-pointer { cursor: pointer; transition: opacity 0.2s; }
+    .cursor-pointer:hover { opacity: 0.8; }
+</style>
+
+@code {
+    // === Regex 로직 ===
+    private string RegexPattern = "";
+    private string TestString = "테스트할 문장을 적어보세요.\n예: 내 이메일은 test@gmail.com 입니다.";
+    private string HighlightedResult = "";
+    private string RegexError = "";
+    private int MatchCount = 0;
+    private bool IgnoreCase = true;
+
+    protected override void OnInitialized()
+    {
+        UpdateRegexMatch();
+    }
+
+    private void SetEmailPreset() => ApplyRegexPreset(@"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$");
+    private void SetPhonePreset() => ApplyRegexPreset(@"^01([0|1|6|7|8|9])-?([0-9]{3,4})-?([0-9]{4})$");
+    private void SetPasswordPreset() => ApplyRegexPreset(@"^(?=.*[A-Za-z])(?=.*\d)(?=.*[@$!%*#?&])[A-Za-z\d@$!%*#?&]{8,}$");
+
+    private void ApplyRegexPreset(string pattern)
+    {
+        RegexPattern = pattern;
+        UpdateRegexMatch();
+    }
+
+    private void UpdateRegexMatch()
+    {
+        if (string.IsNullOrWhiteSpace(RegexPattern) || string.IsNullOrWhiteSpace(TestString))
+        {
+            HighlightedResult = WebUtility.HtmlEncode(TestString);
+            MatchCount = 0;
+            RegexError = "";
+            return;
+        }
+
+        try
+        {
+            RegexOptions options = IgnoreCase ? RegexOptions.IgnoreCase : RegexOptions.None;
+            var regex = new Regex(RegexPattern, options);
+            
+            string encodedText = WebUtility.HtmlEncode(TestString);
+            MatchCount = regex.Matches(TestString).Count;
+            HighlightedResult = regex.Replace(encodedText, m => $"<mark class='bg-warning rounded px-1 fw-bold shadow-sm'>{m.Value}</mark>");
+            RegexError = "";
+        }
+        catch (ArgumentException)
+        {
+            RegexError = "정규식 문법이 올바르지 않습니다.";
+            HighlightedResult = WebUtility.HtmlEncode(TestString);
+            MatchCount = 0;
+        }
+    }
+
+    // === Cron 로직 ===
+    private string CronMin = "*";
+    private string CronHour = "*";
+    private string CronDay = "*";
+    private string CronMonth = "*";
+    private string CronWeek = "*";
+    
+    private string GeneratedCron => $"{CronMin} {CronHour} {CronDay} {CronMonth} {CronWeek}";
+    private string CronDescription = "매분 실행";
+
+    private void SetCronPreset1() => ApplyCronPreset("*", "*", "*", "*", "*", "매분 실행");
+    private void SetCronPreset2() => ApplyCronPreset("0", "*", "*", "*", "*", "매시간 정각 실행");
+    private void SetCronPreset3() => ApplyCronPreset("0", "0", "*", "*", "*", "매일 자정 실행");
+    private void SetCronPreset4() => ApplyCronPreset("30", "9", "*", "*", "1", "매주 월요일 09:30 실행");
+
+    private void ApplyCronPreset(string min, string hour, string day, string month, string week, string desc)
+    {
+        CronMin = min; CronHour = hour; CronDay = day; CronMonth = month; CronWeek = week;
+        CronDescription = desc;
+    }
+
+    private void UpdateCron()
+    {
+        if(string.IsNullOrWhiteSpace(CronMin)) CronMin = "*";
+        if(string.IsNullOrWhiteSpace(CronHour)) CronHour = "*";
+        if(string.IsNullOrWhiteSpace(CronDay)) CronDay = "*";
+        if(string.IsNullOrWhiteSpace(CronMonth)) CronMonth = "*";
+        if(string.IsNullOrWhiteSpace(CronWeek)) CronWeek = "*";
+
+        CronDescription = "사용자 정의 스케줄 (서버 적용 시 테스트 필요)";
+        if (GeneratedCron == "* * * * *") CronDescription = "매분 실행";
+        else if (GeneratedCron == "0 * * * *") CronDescription = "매시간 정각 실행";
+        else if (GeneratedCron == "0 0 * * *") CronDescription = "매일 자정 실행";
+    }
+}

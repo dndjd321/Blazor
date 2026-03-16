@@ -1,0 +1,179 @@
+﻿@page "/crypto-toolbox"
+@rendermode InteractiveServer
+@inject IJSRuntime JSRuntime
+@using System.Text
+@using System.Web
+@using System.Security.Cryptography
+
+<PageTitle>만능 암호화 & 인코딩 툴박스</PageTitle>
+
+<div class="container-fluid py-4" style="max-width: 1000px;">
+    
+    <div class="mb-4 p-4 rounded-4 shadow-sm" style="background: linear-gradient(135deg, #141e30, #243b55);">
+        <h2 class="fw-bold text-white mb-2">
+            <i class="bi bi-shield-lock-fill text-success me-2"></i> 만능 암호화 & 인코딩 툴박스
+        </h2>
+        <p class="text-light opacity-75 mb-0 fs-5">Base64, URL 인코딩, SHA-256 해시 변환을 서버 전송 없이 0.1초 만에 처리합니다.</p>
+    </div>
+
+    <div class="row g-4">
+        <div class="col-12">
+            <div class="card shadow-lg border-0 rounded-4" style="background-color: #f8f9fa;">
+                <div class="card-body p-4 p-md-5">
+                    
+                    <div class="row g-4">
+                        <div class="col-lg-5">
+                            <label class="form-label fw-bold text-secondary"><i class="bi bi-box-arrow-in-right me-1"></i>원본 텍스트 (Input)</label>
+                            <textarea class="form-control font-monospace shadow-sm border-secondary" rows="10" 
+                                      @bind="InputText" @bind:event="oninput" 
+                                      placeholder="변환할 텍스트를 여기에 입력하세요..."></textarea>
+                            
+                            <div class="d-flex justify-content-between mt-2">
+                                <span class="text-muted" style="font-size: 0.85rem;">글자 수: @InputText.Length</span>
+                                <button class="btn btn-sm btn-outline-danger" @onclick="ClearInput">초기화</button>
+                            </div>
+                        </div>
+
+                        <div class="col-lg-2 d-flex flex-column justify-content-center gap-2 px-lg-0">
+                            <div class="text-center text-muted fw-bold mb-2 d-none d-lg-block">변환 도구 <i class="bi bi-arrow-right"></i></div>
+                            
+                            <button class="btn btn-primary fw-bold shadow-sm" @onclick="EncodeBase64">Base64 인코드</button>
+                            <button class="btn btn-outline-primary fw-bold shadow-sm" @onclick="DecodeBase64">Base64 디코드</button>
+                            
+                            <hr class="my-1 text-secondary opacity-25">
+                            
+                            <button class="btn btn-success fw-bold shadow-sm" @onclick="EncodeUrl">URL 인코드</button>
+                            <button class="btn btn-outline-success fw-bold shadow-sm" @onclick="DecodeUrl">URL 디코드</button>
+                            
+                            <hr class="my-1 text-secondary opacity-25">
+                            
+                            <button class="btn btn-dark fw-bold shadow-sm" @onclick="HashSHA256"><i class="bi bi-hash"></i> SHA-256 해시</button>
+                        </div>
+
+                        <div class="col-lg-5">
+                            <label class="form-label fw-bold text-secondary"><i class="bi bi-box-arrow-right me-1"></i>변환 결과 (Output)</label>
+                            <textarea class="form-control font-monospace shadow-sm border-secondary bg-white" rows="10" 
+                                      readonly value="@OutputText" 
+                                      placeholder="결과가 여기에 표시됩니다."></textarea>
+                            
+                            <div class="d-flex justify-content-between mt-2 align-items-center">
+                                @if (!string.IsNullOrEmpty(ErrorMessage))
+                                {
+                                    <span class="text-danger fw-bold" style="font-size: 0.85rem;"><i class="bi bi-exclamation-circle-fill me-1"></i>@ErrorMessage</span>
+                                }
+                                else if (IsCopied)
+                                {
+                                    <span class="text-success fw-bold" style="font-size: 0.85rem;"><i class="bi bi-check-circle-fill me-1"></i>복사 완료!</span>
+                                }
+                                else
+                                {
+                                    <span></span>
+                                }
+                                
+                                <button class="btn btn-sm btn-dark fw-bold" @onclick="CopyToClipboard" disabled="@string.IsNullOrEmpty(OutputText)">
+                                    <i class="bi bi-clipboard me-1"></i>결과 복사하기
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    private string InputText = "";
+    private string OutputText = "";
+    private string ErrorMessage = "";
+    private bool IsCopied = false;
+
+    private void ClearInput()
+    {
+        InputText = "";
+        OutputText = "";
+        ErrorMessage = "";
+        IsCopied = false;
+    }
+
+    // --- Base64 로직 ---
+    private void EncodeBase64()
+    {
+        ErrorMessage = ""; IsCopied = false;
+        if (string.IsNullOrEmpty(InputText)) return;
+        try
+        {
+            var plainTextBytes = Encoding.UTF8.GetBytes(InputText);
+            OutputText = Convert.ToBase64String(plainTextBytes);
+        }
+        catch (Exception ex) { ErrorMessage = "인코딩 실패: " + ex.Message; }
+    }
+
+    private void DecodeBase64()
+    {
+        ErrorMessage = ""; IsCopied = false;
+        if (string.IsNullOrEmpty(InputText)) return;
+        try
+        {
+            var base64EncodedBytes = Convert.FromBase64String(InputText);
+            OutputText = Encoding.UTF8.GetString(base64EncodedBytes);
+        }
+        catch (FormatException) { ErrorMessage = "올바른 Base64 문자열이 아닙니다."; OutputText = ""; }
+        catch (Exception ex) { ErrorMessage = "디코딩 실패: " + ex.Message; }
+    }
+
+    // --- URL 인코딩 로직 ---
+    private void EncodeUrl()
+    {
+        ErrorMessage = ""; IsCopied = false;
+        if (string.IsNullOrEmpty(InputText)) return;
+        OutputText = HttpUtility.UrlEncode(InputText);
+    }
+
+    private void DecodeUrl()
+    {
+        ErrorMessage = ""; IsCopied = false;
+        if (string.IsNullOrEmpty(InputText)) return;
+        OutputText = HttpUtility.UrlDecode(InputText);
+    }
+
+    // --- SHA-256 해시 로직 ---
+    private void HashSHA256()
+    {
+        ErrorMessage = ""; IsCopied = false;
+        if (string.IsNullOrEmpty(InputText)) return;
+        try
+        {
+            using (SHA256 sha256Hash = SHA256.Create())
+            {
+                byte[] bytes = sha256Hash.ComputeHash(Encoding.UTF8.GetBytes(InputText));
+                StringBuilder builder = new StringBuilder();
+                for (int i = 0; i < bytes.Length; i++)
+                {
+                    builder.Append(bytes[i].ToString("x2"));
+                }
+                OutputText = builder.ToString();
+            }
+        }
+        catch (Exception ex) { ErrorMessage = "해시 생성 실패: " + ex.Message; }
+    }
+
+    // --- 클립보드 복사 로직 (JS Interop) ---
+    private async Task CopyToClipboard()
+    {
+        if (string.IsNullOrEmpty(OutputText)) return;
+        
+        try
+        {
+            await JSRuntime.InvokeVoidAsync("navigator.clipboard.writeText", OutputText);
+            IsCopied = true;
+            await Task.Delay(2000); // 2초 뒤 복사 완료 메시지 숨김
+            IsCopied = false;
+        }
+        catch
+        {
+            ErrorMessage = "브라우저 권한 문제로 클립보드 복사에 실패했습니다.";
+        }
+    }
+}
